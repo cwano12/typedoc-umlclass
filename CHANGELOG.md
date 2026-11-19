@@ -1,10 +1,22 @@
 # Changelog
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.7.0] - 2026-11-19
+
+- Support TypeDoc 0.28 and its ESM plugin loader using the upstream 0.10.2 implementation.
+- Match hierarchy sections containing TypeDoc 0.28 attributes and multiline HTML.
+- Generate real SVG output and use portable local image URLs on Windows.
+- Preserve the fork's `coverage` and `excludedClasses` options.
+- Insert diagrams for standalone classes and interfaces when `coverage` is `all`.
+- Build compiled JavaScript before packing so npm releases contain the plugin entry point.
+- Require explicit plugin loading and document the supported TypeDoc version.
+
 
 ## [0.6.0] - 2021-09-21
 ### Breaking Changes

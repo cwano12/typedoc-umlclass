@@ -1,5 +1,5 @@
-import { DeclarationReflection, Type, TypeParameterReflection } from "typedoc";
-import { PlantUmlCodeGenerator } from "./plantuml_code_generator";
+import { type DeclarationReflection, type Type, type TypeParameterReflection } from "typedoc";
+import { PlantUmlCodeGenerator } from "./plantuml_code_generator.js";
 
 /**
  * Class that generates PlantUML code and caches results internally.
@@ -54,6 +54,6 @@ export class CachingPlantUmlCodeGenerator extends PlantUmlCodeGenerator {
             );
         }
 
-        return this.reflectionPlantUmlCache.get(cacheKey) as string[];
+        return this.reflectionPlantUmlCache.get(cacheKey) ?? [];
     }
 }

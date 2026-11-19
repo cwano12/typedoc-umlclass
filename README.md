@@ -8,8 +8,10 @@ This is a fork from typedoc-classuml.  This fork was created to add options to g
 classes and interfaces regardless of whether or not they are part of a hierarchy.  Also, there is an option
 to exclude any class or interface from class diagram generation.
 
-TypeDoc automatically detects plugins installed via npm. After installation TypeDoc can be used normally and
-this plugin is going to create a UML class diagram for every class and interface within your project.
+Load the plugin explicitly with `typedoc --plugin typedoc-umlclass-mod`, or add
+`"plugin": ["typedoc-umlclass-mod"]` to your TypeDoc configuration. By default diagrams
+are generated for classes and interfaces in a hierarchy. Set `coverage` to `all`
+to include standalone declarations.
 
 Example:
 
@@ -29,7 +31,7 @@ The plugin requires the following software to be installed on your system:
 
 * [JAVA](https://www.java.com/) (latest version)
 * [Graphviz](https://graphviz.org/) (latest version)
-* [TypeDoc](https://typedoc.org/) (supported versions: 0.22.0 and above)
+* [TypeDoc](https://typedoc.org/) (supported versions: 0.28.x)
 
 ## Options
 
@@ -39,6 +41,7 @@ For example:
 
 ```json
 {
+    "plugin": ["typedoc-umlclass-mod"],
     "entryPoints": ["./src/index.ts"],
     "out": "doc",
     "umlClassDiagram": {
@@ -58,6 +61,8 @@ For example:
 | **remoteBaseUrl** `<string>` | Specifies the base URL that is used when generating remote image URLs. An example image URL is `http://www.plantuml.com/plantuml/svg/SyfFKj2rKt3CoKnELR1Io4ZDoSa70000` from which `http://www.plantuml.com` is the base URL. You can use this option if you are running your own [PlantUML PicoWeb Server](https://plantuml.com/picoweb). | `http://www.plantuml.com` |
 | **format** `<png\|svg>` | Specifies the format the generated images should have. You can choose between `png` and `svg`. | `svg` |
 | **coverage** `<all\|hierarchy>` | This options allows diagrams to be generated even for classes/interfaces that are not part of hierarchy if `all` is set. The default behavior is maintained with the `hierarchy` option. | `hierarchy` |
+
+| **excludedClasses** `string[]` | Names of classes or interfaces that should not receive diagrams. Applies to both coverage modes. | `[]` |
 
 ### HTML output
 
@@ -106,3 +111,18 @@ For example:
 ## License
 
 Licensed under ISC.
+
+## Development
+
+Use Node.js 20 or newer with Java and Graphviz available on `PATH`.
+
+```sh
+npm ci
+npm test
+npm run lint
+npm run format
+npm pack
+```
+
+The tests render TypeDoc pages and verify hierarchy and standalone diagrams,
+exclusions, placement, and actual local and embedded SVG generation.

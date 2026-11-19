@@ -1,28 +1,27 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as ProgressBar from "progress";
+import ProgressBar from "progress";
 import {
-    Application,
-    Context,
+    type Application,
+    type Context,
     Converter,
     DeclarationReflection,
     PageEvent,
-    ProjectReflection,
-    Reflection,
+    type ProjectReflection,
     ReflectionKind,
     RendererEvent,
 } from "typedoc";
-import { createDiagramLegendForPlantUml, DiagramLegend } from "./diagram_legend";
-import { createEmbeddedImageUrl, createLocalImageFileUrl, createRemoteImageUrl } from "./image_url_generator";
-import { Logger } from "./logger";
-import { CachingPlantUmlCodeGenerator } from "./plantuml/caching_plantuml_code_generator";
-import { PlantUmlCodeGenerator } from "./plantuml/plantuml_code_generator";
-import { PlantUmlDiagramGenerator } from "./plantuml/plantuml_diagram_generator";
-import { PluginOptions } from "./plugin_options";
-import { PageProcessor } from "./typedoc/page_processor";
-import { createHierarchyDiagramSection, PageSections } from "./typedoc/page_section";
-import { PageSectionFinder } from "./typedoc/page_section_finder";
-import { reflectionIsPartOfClassHierarchy } from "./typedoc/typedoc_utils";
+import { createDiagramLegendForPlantUml, DiagramLegend } from "./diagram_legend.js";
+import { createEmbeddedImageUrl, createLocalImageFileUrl, createRemoteImageUrl } from "./image_url_generator.js";
+import { Logger } from "./logger.js";
+import { CachingPlantUmlCodeGenerator } from "./plantuml/caching_plantuml_code_generator.js";
+import { type PlantUmlCodeGenerator, type PlantUmlCodeGeneratorOptions } from "./plantuml/plantuml_code_generator.js";
+import { PlantUmlDiagramGenerator } from "./plantuml/plantuml_diagram_generator.js";
+import { PluginOptions } from "./plugin_options.js";
+import { PageProcessor } from "./typedoc/page_processor.js";
+import { createHierarchyDiagramSection, PageSections } from "./typedoc/page_section.js";
+import { PageSectionFinder } from "./typedoc/page_section_finder.js";
+import { reflectionIsPartOfClassHierarchy } from "./typedoc/typedoc_utils.js";
 
 /**
  * The UML class diagram generator plugin.
@@ -38,6 +37,9 @@ import { reflectionIsPartOfClassHierarchy } from "./typedoc/typedoc_utils";
  * 3. The plugin adds a section with the image to the page of each class and interface.
  */
 export class Plugin {
+    /** The TypeDoc application instance that loaded the plugin. */
+    private typedoc!: Application;
+
     /** The options of this plugin. */
     private readonly options = new PluginOptions();
 
@@ -51,9 +53,7 @@ export class Plugin {
     private plantUmlCodeGenerator!: PlantUmlCodeGenerator;
 
     /** Object that uses PlantUML code to generate PlantUML diagrams. */
-    private plantUmlDiagramGenerator!:
-        | PlantUmlDiagramGenerator<{ reflection: DeclarationReflection; pageFilePath: string }>
-        | undefined;
+    private plantUmlDiagramGenerator!: PlantUmlDiagramGenerator | undefined;
 
     /** Progress bar shown when generating the diagrams. */
     private progressBar: ProgressBar | undefined;
@@ -109,30 +109,10 @@ export class Plugin {
      * @param typedoc The TypeDoc application.
      */
     public initialize(typedoc: Application): void {
-        this.addOptionsToApplication(typedoc);
-        this.subscribeToApplicationEvents(typedoc);
-    }
+        this.typedoc = typedoc;
 
-    /**
-     * Adds the plugin's options to the application's options.
-     * @param typedoc The TypeDoc application.
-     */
-    private addOptionsToApplication(typedoc: Application): void {
-        this.options.addToApplication(typedoc);
-    }
-
-    /**
-     * Subscribes to events of the application so that the plugin can do its work
-     * in the particular doc generation phases.
-     * @param typedoc The TypeDoc application.
-     */
-    private subscribeToApplicationEvents(typedoc: Application): void {
-        typedoc.converter.on(Converter.EVENT_RESOLVE_BEGIN, (c: Context) => this.onConverterResolveBegin(c));
-        typedoc.converter.on(Converter.EVENT_RESOLVE_END, (c: Context) => this.onConverterResolveEnd(c));
-
-        typedoc.renderer.on(RendererEvent.BEGIN, (e: RendererEvent) => this.onRendererBegin(e));
-        typedoc.renderer.on(PageEvent.END, (e: PageEvent) => this.onRendererEndPage(e));
-        typedoc.renderer.on(RendererEvent.END, (e: RendererEvent) => this.onRendererEnd(e));
+        this.addOptionsToApplication();
+        this.subscribeToApplicationEvents();
     }
 
     /**
@@ -159,18 +139,20 @@ export class Plugin {
             this.log?.info("The result is: " + this.numberOfDiagramsToGenerate.toString());
 
             if (this.hasWork) {
-                this.plantUmlCodeGenerator = new CachingPlantUmlCodeGenerator(this.options);
+                this.plantUmlCodeGenerator = new CachingPlantUmlCodeGenerator(
+                    this.createPlantUmlCodeGeneratorOptions(),
+                );
 
                 if (this.isGeneratingImages) {
-                    this.plantUmlDiagramGenerator = new PlantUmlDiagramGenerator<ReflectionPageId>(
+                    this.plantUmlDiagramGenerator = new PlantUmlDiagramGenerator(
                         this.options.generatorProcessCount,
                         this.options.format,
-                        this.onImageGenerated,
                     );
 
                     if (!this.options.hideProgressBar) {
                         this.log?.info("Setting up progress bar ...");
                         this.progressBar = new ProgressBar(
+                            // eslint-disable-next-line max-len
                             `Using ${this.options.generatorProcessCount} process(es) to add ${this.numberOfDiagramsToGenerate} class diagrams [:bar] :percent`,
                             {
                                 total: this.numberOfDiagramsToGenerate,
@@ -181,25 +163,6 @@ export class Plugin {
                 }
             }
         }
-    }
-
-    /**
-     * Computes how many diagrams the plugin must generate.
-     * @param project The project containing the reflections for which the diagrams are generated.
-     * @returns The number of diagrams to generate.
-     */
-    private computeDiagramCount(project: ProjectReflection): number {
-        let count = 0;
-
-        for (const key in project.reflections) {
-            const reflection = project.reflections[key];
-
-            if (this.shouldProcessReflection(reflection)) {
-                ++count;
-            }
-        }
-
-        return count;
     }
 
     /**
@@ -232,25 +195,128 @@ export class Plugin {
     }
 
     /**
+     * Triggered after the renderer has written all documents.
+     * Appends style data to the main CSS file.
+     * @param event The event emitted by the renderer class.
+     */
+    public onRendererEnd(event: RendererEvent): void {
+        if (this.isActive && this.hasWork) {
+            this.log?.info("Attaching content to CSS file ...");
+
+            const filename = path.join(event.outputDirectory, "assets/style.css");
+
+            let data =
+                fs.readFileSync(filename, "utf8") +
+                // eslint-disable-next-line max-len
+                "\n.tsd-hierarchy-diagram .diagram { max-width: 100%; display: block; margin: 0 auto; text-align: center; }\n";
+
+            if (this.shouldGenerateLegends) {
+                data += DiagramLegend.getCss();
+            }
+
+            fs.writeFileSync(filename, data, "utf8");
+
+            this.log?.info("DONE");
+
+            if (this.isGeneratingImages && this.plantUmlDiagramGenerator) {
+                this.plantUmlDiagramGenerator.shutdown();
+            }
+        }
+    }
+
+    /**
+     * Adds the plugin's options to the application's options.
+     */
+    private addOptionsToApplication(): void {
+        this.options.addToApplication(this.typedoc);
+    }
+
+    /**
+     * Subscribes to events of the application so that the plugin can do its work
+     * in the particular doc generation phases.
+     */
+    private subscribeToApplicationEvents(): void {
+        this.typedoc.converter.on(Converter.EVENT_RESOLVE_BEGIN, (c: Context) => {
+            this.onConverterResolveBegin(c);
+        });
+        this.typedoc.converter.on(Converter.EVENT_RESOLVE_END, (c: Context) => {
+            this.onConverterResolveEnd(c);
+        });
+
+        this.typedoc.renderer.on(RendererEvent.BEGIN, (e: RendererEvent) => {
+            this.onRendererBegin(e);
+        });
+        this.typedoc.renderer.on(PageEvent.END, (e: PageEvent) => {
+            this.onRendererEndPage(e);
+        });
+        this.typedoc.renderer.on(RendererEvent.END, (e: RendererEvent) => {
+            this.onRendererEnd(e);
+        });
+    }
+
+    /**
+     * Creates the PlantUML code generator options using the current plugin options.
+     * @returns The options for the PlantUML code generator.
+     */
+    private createPlantUmlCodeGeneratorOptions(): PlantUmlCodeGeneratorOptions {
+        return {
+            type: this.options.type,
+            methodParameterOutput: this.options.methodParameterOutput,
+            memberOrder: this.options.memberOrder,
+            topDownLayoutMaxSiblings: this.options.topDownLayoutMaxSiblings,
+            visibilityStyle: this.options.visibilityStyle,
+            hideEmptyMembers: this.options.hideEmptyMembers,
+            hideCircledChar: this.options.hideCircledChar,
+            hideShadow: this.options.hideShadow,
+            diagramBackgroundColor: this.options.backgroundColor,
+            boxBackgroundColor: this.options.box.backgroundColor,
+            boxBorderWidth: this.options.box.border.width,
+            boxBorderColor: this.options.box.border.color,
+            boxBorderRadius: this.options.box.border.radius,
+            arrowWidth: this.options.arrow.width,
+            arrowColor: this.options.arrow.color,
+            className: this.options.class.name,
+            interfaceName: this.options.interface.name,
+            propertyName: this.options.property.name,
+            propertyType: this.options.property.type,
+            methodName: this.options.method.name,
+            methodParameterName: this.options.method.parameter.name,
+            methodParameterType: this.options.method.parameter.type,
+            methodReturnType: this.options.method.returnType,
+        };
+    }
+
+    /**
+     * Computes how many diagrams the plugin must generate.
+     * @param project The project containing the reflections for which the diagrams are generated.
+     * @returns The number of diagrams to generate.
+     */
+    private computeDiagramCount(project: ProjectReflection): number {
+        let count = 0;
+
+        for (const key in project.reflections) {
+            const reflection = project.reflections[key];
+
+            if (this.shouldProcessReflection(reflection)) {
+                ++count;
+            }
+        }
+
+        return count;
+    }
+
+    /**
      * Checks if the plugin should process a given reflection.
      * @param reflection The reflection in question.
      * @returns True, if the plugin should process the reflection, otherwise false.
      */
-    // eslint-disable-next-line class-methods-use-this
     private shouldProcessReflection(reflection: unknown): reflection is DeclarationReflection {
-        if (this.options.excludedClasses.includes((reflection as Reflection).name)) {
-            return false;
-        }
-
         if (
             reflection instanceof DeclarationReflection &&
-            (reflection.kind === ReflectionKind.Class || reflection.kind === ReflectionKind.Interface)
+            (reflection.kind === ReflectionKind.Class || reflection.kind === ReflectionKind.Interface) &&
+            !this.options.excludedClasses.includes(reflection.name) &&
+            (this.options.coverage === "all" || reflectionIsPartOfClassHierarchy(reflection))
         ) {
-            if (this.options.coverage === "hierarchy") {
-                if (!reflectionIsPartOfClassHierarchy(reflection)) {
-                    return false;
-                }
-            }
             return true;
         }
 
@@ -262,9 +328,11 @@ export class Plugin {
      * @param pageContent The content of the page.
      * @returns True, if the plugin should process the page, otherwise false.
      */
-    // eslint-disable-next-line class-methods-use-this
     private shouldProcessPage(pageContent?: string): boolean {
-        if (pageContent && PageSectionFinder.hasSection(pageContent, PageSections.Hierarchy)) {
+        if (
+            pageContent &&
+            (this.options.coverage === "all" || PageSectionFinder.hasSection(pageContent, PageSections.Hierarchy))
+        ) {
             return true;
         }
 
@@ -294,7 +362,14 @@ export class Plugin {
 
         if (this.isGeneratingImages && this.plantUmlDiagramGenerator) {
             this.log?.info(`Creating diagram image for reflection ${reflection.name} ...`);
-            this.plantUmlDiagramGenerator.generate({ reflection, pageFilePath: event.filename }, plantUml + "\n");
+
+            const job = this.plantUmlDiagramGenerator.generate(plantUml + "\n").then((imageData) => {
+                this.processImageData(reflection, event.filename, imageData);
+            });
+
+            // Notify TypeDoc of the async job so that it can await it before shutting itself down.
+            // Without this the generator processes are killed when the TypeDoc process ends.
+            this.typedoc.renderer.postRenderAsyncJobs.push(async () => job);
         } else if (this.options.location === "remote") {
             this.log?.info(`Creating remote image URL for reflection ${reflection.name} ...`);
             const imageUrl = createRemoteImageUrl(this.options.remoteBaseUrl, plantUml, this.options.format);
@@ -305,26 +380,31 @@ export class Plugin {
     }
 
     /**
-     * Called by the PlantUmlDiagramGenerator when a diagram images has been generated.
-     * @param id ID info for the reflection for which the image was generated.
+     * Processes the image data of a generated diagram by creating an image URL and adding it to the reflection's page.
+     * @param reflection The reflection for which the image was generated.
+     * @param pageFilePath Path to the output file of the reflection's doc page.
      * @param imageData The data of the generated image.
      */
-    private readonly onImageGenerated = (id: ReflectionPageId, imageData: Readonly<Buffer>): void => {
+    private readonly processImageData = (
+        reflection: DeclarationReflection,
+        pageFilePath: string,
+        imageData: Readonly<Buffer>,
+    ): void => {
         let imageUrl = "";
 
         if (this.options.location === "local") {
-            this.log?.info(`Writing local image file for reflection ${id.reflection.name} ...`);
-            const absoluteImageFilePath = this.writeLocalImageFileForReflection(imageData, id.reflection);
+            this.log?.info(`Writing local image file for reflection ${reflection.name} ...`);
+            const absoluteImageFilePath = this.writeLocalImageFileForReflection(imageData, reflection);
 
-            this.log?.info(`Creating local image URL for reflection ${id.reflection.name} ...`);
-            imageUrl = createLocalImageFileUrl(id.pageFilePath, absoluteImageFilePath);
+            this.log?.info(`Creating local image URL for reflection ${reflection.name} ...`);
+            imageUrl = createLocalImageFileUrl(pageFilePath, absoluteImageFilePath);
         } else {
-            this.log?.info(`Creating embedded image URL for reflection ${id.reflection.name} ...`);
+            this.log?.info(`Creating embedded image URL for reflection ${reflection.name} ...`);
             imageUrl = createEmbeddedImageUrl(imageData, this.options.format);
         }
 
-        this.log?.info(`Inserting diagram into page for reflection ${id.reflection.name} ...`);
-        this.insertHierarchyDiagramIntoFile(id.pageFilePath, id.reflection, imageUrl);
+        this.log?.info(`Inserting diagram into page for reflection ${reflection.name} ...`);
+        this.insertHierarchyDiagramIntoFile(pageFilePath, reflection, imageUrl);
 
         this.progressBar?.tick();
     };
@@ -339,7 +419,7 @@ export class Plugin {
         const filename = `${reflection.name}-umlClassDiagram-${reflection.id}.${this.options.format}`;
         const absoluteFilePath = path.join(this.outputDirectory, filename);
 
-        fs.writeFileSync(absoluteFilePath, imageData as Buffer);
+        fs.writeFileSync(absoluteFilePath, imageData);
         return absoluteFilePath;
     }
 
@@ -370,7 +450,9 @@ export class Plugin {
             legend.hideTypeIcons();
         }
 
-        if (this.options.attributeFontStyle === "italic") {
+        if (this.options.isAnythingStyledItalic) {
+            // PlantUML uses an italic font for abstract members. If the user specified an italic font for anything
+            // then this is no longer reasonable and we hide this entry in the legend to avoid confusion.
             legend.hideAbstractMemberItem();
         }
 
@@ -417,6 +499,14 @@ export class Plugin {
             legend && !legend.isEmpty ? legend.getHtml(this.options.visibilityStyle) : "",
         );
 
+        if (!PageSectionFinder.hasSection(originalContent, PageSections.Hierarchy)) {
+            // Standalone declarations have no hierarchy section to use as an anchor.
+            return originalContent.replace(
+                /(<div class="tsd-page-title">[\s\S]*?<\/h1>\s*<\/div>)/,
+                "$1" + hierarchyDiagramSection,
+            );
+        }
+
         if (this.options.position === "above") {
             page.insertAboveSection(PageSections.Hierarchy, hierarchyDiagramSection);
         } else {
@@ -425,43 +515,4 @@ export class Plugin {
 
         return page.content;
     }
-
-    /**
-     * Triggered after the renderer has written all documents.
-     * Appends style data to the main CSS file.
-     * @param event The event emitted by the renderer class.
-     */
-    public onRendererEnd(event: RendererEvent): void {
-        if (this.isActive && this.hasWork) {
-            this.log?.info("Attaching content to CSS file ...");
-
-            const filename = path.join(event.outputDirectory, "assets/style.css");
-
-            let data =
-                fs.readFileSync(filename, "utf8") +
-                "\n.tsd-hierarchy-diagram .diagram { max-width: 100%; display: block; margin: 0 auto; text-align: center; }\n";
-
-            if (this.shouldGenerateLegends) {
-                data += DiagramLegend.getCss();
-            }
-
-            fs.writeFileSync(filename, data, "utf8");
-
-            this.log?.info("DONE");
-
-            if (this.isGeneratingImages && this.plantUmlDiagramGenerator) {
-                this.plantUmlDiagramGenerator.shutdown();
-            }
-        }
-    }
 }
-
-/**
- * Type with information required to ID a reflection and its output file.
- */
-type ReflectionPageId = {
-    /** The reflection. */
-    reflection: DeclarationReflection;
-    /** Path to the output file of the reflection's doc page. */
-    pageFilePath: string;
-};
