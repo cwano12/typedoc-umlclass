@@ -1,8 +1,9 @@
-import { PageSections } from "./page_section";
+import { type PageSections } from "./page_section.js";
 
 /**
  * Helper class for finding sections on a TypeDoc page.
  */
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class -- Static section lookup helper.
 export class PageSectionFinder {
     /** Map for caching regular expressions to find a section on a page. */
     private static readonly pageSectionLookUpCache = new Map<PageSections, RegExp>();
@@ -41,14 +42,14 @@ export class PageSectionFinder {
      * @returns The regular expression to match the section.
      */
     private static getLookUpRegexpForSection(section: PageSections): RegExp {
-        if (!PageSectionFinder.pageSectionLookUpCache.has(section)) {
-            PageSectionFinder.pageSectionLookUpCache.set(
-                section,
-                PageSectionFinder.createLookUpRegexpForSection(section),
-            );
+        let regex = PageSectionFinder.pageSectionLookUpCache.get(section);
+
+        if (!regex) {
+            regex = PageSectionFinder.createLookUpRegexpForSection(section);
+            PageSectionFinder.pageSectionLookUpCache.set(section, regex);
         }
 
-        return PageSectionFinder.pageSectionLookUpCache.get(section) as RegExp;
+        return regex;
     }
 
     /**
@@ -57,6 +58,10 @@ export class PageSectionFinder {
      * @returns The regular expression to match the section.
      */
     private static createLookUpRegexpForSection(sectionName: string): RegExp {
-        return new RegExp('<section class="tsd-panel[^"<>]*?">\\s*<h3>' + sectionName + "</h3>[^]*?</section>");
+        return new RegExp(
+            '<section class="tsd-panel[^"<>]*"[^>]*>\\s*<h(\\d)[^>]*>' +
+                sectionName +
+                "\\b[\\s\\S]*?</h\\1>[\\s\\S]*?</section>",
+        );
     }
 }
